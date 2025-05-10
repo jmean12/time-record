@@ -3,6 +3,7 @@ import * as Location from "expo-location";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Platform,
   SafeAreaView,
   StatusBar,
@@ -19,6 +20,9 @@ export default function HomeScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isCheckedIn, setIsCheckedIn] = useState(false);
   const [checkInTime, setCheckInTime] = useState<Date | null>(null);
+  const [checkOutTime, setCheckOutTime] = useState<Date | null>(null);
+  const [progressWidth] = useState(new Animated.Value(0));
+  const WORKING_HOURS = 8;
 
   // 실시간 시계 업데이트
   useEffect(() => {
@@ -28,6 +32,20 @@ export default function HomeScreen() {
 
     return () => clearInterval(timer);
   }, []);
+
+  // 근무 시간 프로그레스 바 업데이트
+  useEffect(() => {
+    if (isCheckedIn && checkInTime) {
+      const elapsedTime = (currentTime.getTime() - checkInTime.getTime()) / (1000 * 60 * 60);
+      const progress = Math.min(elapsedTime / WORKING_HOURS, 1);
+
+      Animated.timing(progressWidth, {
+        toValue: progress,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+    }
+  }, [currentTime, isCheckedIn, checkInTime]);
 
   // 위치 정보 가져오기
   useEffect(() => {
@@ -68,6 +86,7 @@ export default function HomeScreen() {
     const time = new Date();
     setIsCheckedIn(true);
     setCheckInTime(time);
+    setCheckOutTime(null);
 
     // 여기에 출근 시간 저장 로직 추가 (API 호출 등)
     console.log("출근 시간:", time.toLocaleString());
@@ -77,6 +96,7 @@ export default function HomeScreen() {
   const handleCheckOut = () => {
     const time = new Date();
     setIsCheckedIn(false);
+    setCheckOutTime(time);
 
     // 여기에 퇴근 시간 저장 로직 추가 (API 호출 등)
     console.log("퇴근 시간:", time.toLocaleString());
@@ -112,6 +132,60 @@ export default function HomeScreen() {
       .padStart(2, "0")}`;
   };
 
+  // 시간만 포맷팅 (초 없이)
+  const formatTimeShort = (date: Date) => {
+    const hours = date.getHours();
+    const minutes = date.getMinutes();
+    const ampm = hours >= 12 ? "오후" : "오전";
+    const formattedHours = hours % 12 || 12;
+
+    return `${ampm} ${formattedHours}:${minutes.toString().padStart(2, "0")}`;
+  };
+
+  // 근무 시간 계산
+  const calculateWorkingHours = () => {
+    if (!checkInTime) return "0시간";
+
+    const endTime = checkOutTime || currentTime;
+    const hours = (endTime.getTime() - checkInTime.getTime()) / (1000 * 60 * 60);
+
+    const wholeHours = Math.floor(hours);
+    const minutes = Math.floor((hours - wholeHours) * 60);
+
+    return `${wholeHours}시간 ${minutes}분`;
+  };
+
+  // 남은 근무 시간 계산
+  const calculateRemainingTime = () => {
+    if (!checkInTime) return "0시간";
+
+    const targetTime = new Date(checkInTime.getTime() + WORKING_HOURS * 60 * 60 * 1000);
+    const remaining = (targetTime.getTime() - currentTime.getTime()) / (1000 * 60);
+
+    if (remaining <= 0) return "근무 완료";
+
+    const hours = Math.floor(remaining / 60);
+    const minutes = Math.floor(remaining % 60);
+
+    return `${hours}시간 ${minutes}분`;
+  };
+
+  // 퇴근 예정 시간
+  const getExpectedCheckoutTime = () => {
+    if (!checkInTime) return "";
+    return formatTimeShort(new Date(checkInTime.getTime() + WORKING_HOURS * 60 * 60 * 1000));
+  };
+
+  // 근무 진행률 계산 (%)
+  const getWorkProgressPercent = () => {
+    if (!checkInTime) return 0;
+
+    const elapsedTime = (currentTime.getTime() - checkInTime.getTime()) / (1000 * 60 * 60);
+    const progress = Math.min((elapsedTime / WORKING_HOURS) * 100, 100);
+
+    return Math.round(progress);
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
@@ -135,34 +209,119 @@ export default function HomeScreen() {
         ) : (
           <View style={styles.actionContainer}>
             {!isCheckedIn ? (
-              <TouchableOpacity
-                style={[styles.button, styles.checkInButton]}
-                onPress={handleCheckIn}
-              >
-                <Ionicons name="enter-outline" size={24} color="white" />
-                <Text style={styles.buttonText}>출근하기</Text>
-              </TouchableOpacity>
+              checkOutTime ? (
+                // 퇴근 완료 상태
+                <View style={styles.workSummaryContainer}>
+                  <View style={styles.workSummaryHeader}>
+                    <Ionicons name="checkmark-circle" size={24} color="#10b981" />
+                    <Text style={styles.workSummaryTitle}>근무 완료</Text>
+                  </View>
+
+                  <View style={styles.timeInfoContainer}>
+                    <View style={styles.timeInfoItem}>
+                      <Ionicons name="enter-outline" size={20} color="#4f46e5" />
+                      <View>
+                        <Text style={styles.timeInfoLabel}>출근</Text>
+                        <Text style={styles.timeInfoValue}>
+                          {checkInTime ? formatTimeShort(checkInTime) : "-"}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.timeInfoDivider} />
+
+                    <View style={styles.timeInfoItem}>
+                      <Ionicons name="exit-outline" size={20} color="#ef4444" />
+                      <View>
+                        <Text style={styles.timeInfoLabel}>퇴근</Text>
+                        <Text style={styles.timeInfoValue}>
+                          {checkOutTime ? formatTimeShort(checkOutTime) : "-"}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.workDurationContainer}>
+                    <Text style={styles.workDurationLabel}>총 근무 시간</Text>
+                    <Text style={styles.workDurationValue}>{calculateWorkingHours()}</Text>
+                  </View>
+
+                  <TouchableOpacity
+                    style={[styles.button, styles.checkInButton]}
+                    onPress={handleCheckIn}
+                  >
+                    <Ionicons name="enter-outline" size={24} color="white" />
+                    <Text style={styles.buttonText}>새로운 근무 시작</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                // 출근 전 상태
+                <TouchableOpacity
+                  style={[styles.button, styles.checkInButton]}
+                  onPress={handleCheckIn}
+                >
+                  <Ionicons name="enter-outline" size={24} color="white" />
+                  <Text style={styles.buttonText}>출근하기</Text>
+                </TouchableOpacity>
+              )
             ) : (
+              // 근무 중 상태
               <View style={styles.checkedInContainer}>
                 <View style={styles.checkedInInfo}>
-                  <View
-                    style={{ flexDirection: "row", alignItems: "center", justifyContent: "center" }}
-                  >
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={18}
-                      color="#10b981"
-                      style={{ marginRight: 4 }}
-                    />
-                    <Text style={styles.checkedInText}>
-                      {checkInTime?.toLocaleTimeString("ko-KR", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                      에 출근했습니다
+                  <View style={styles.checkedInHeader}>
+                    <View style={styles.statusIndicator}>
+                      <View style={styles.statusDot} />
+                      <Text style={styles.statusText}>근무 중</Text>
+                    </View>
+                    <Text style={styles.checkedInTime}>
+                      {checkInTime ? formatTimeShort(checkInTime) : "-"}에 출근
                     </Text>
                   </View>
+
+                  <View style={styles.progressContainer}>
+                    <View style={styles.progressBarBackground}>
+                      <Animated.View
+                        style={[
+                          styles.progressBar,
+                          {
+                            width: progressWidth.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: ["0%", "100%"],
+                            }),
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Text style={styles.progressText}>{getWorkProgressPercent()}% 완료</Text>
+                  </View>
+
+                  <View style={styles.workInfoGrid}>
+                    <View style={styles.workInfoItem}>
+                      <Ionicons name="time-outline" size={18} color="#4f46e5" />
+                      <Text style={styles.workInfoLabel}>근무 시간</Text>
+                      <Text style={styles.workInfoValue}>{calculateWorkingHours()}</Text>
+                    </View>
+
+                    <View style={styles.workInfoItem}>
+                      <Ionicons name="hourglass-outline" size={18} color="#f59e0b" />
+                      <Text style={styles.workInfoLabel}>남은 시간</Text>
+                      <Text style={styles.workInfoValue}>{calculateRemainingTime()}</Text>
+                    </View>
+
+                    <View style={styles.workInfoItem}>
+                      <Ionicons name="exit-outline" size={18} color="#ef4444" />
+                      <Text style={styles.workInfoLabel}>퇴근 예정</Text>
+                      <Text style={styles.workInfoValue}>{getExpectedCheckoutTime()}</Text>
+                    </View>
+
+                    <View style={styles.workInfoItem}>
+                      <Ionicons name="calendar-outline" size={18} color="#10b981" />
+                      <Text style={styles.workInfoLabel}>목표 시간</Text>
+                      <Text style={styles.workInfoValue}>{WORKING_HOURS}시간</Text>
+                    </View>
+                  </View>
                 </View>
+
                 <TouchableOpacity
                   style={[styles.button, styles.checkOutButton]}
                   onPress={handleCheckOut}
@@ -261,20 +420,141 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   checkedInInfo: {
-    backgroundColor: "#ecfdf5",
+    backgroundColor: "#f0f9ff",
     padding: 16,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#d1fae5",
-    marginBottom: 8,
+    borderColor: "#bae6fd",
   },
-  checkedInText: {
-    display: "flex",
+  checkedInHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    justifyContent: "center",
+    marginBottom: 12,
+  },
+  statusIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  statusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#4f46e5",
+    marginRight: 6,
+  },
+  statusText: {
     fontSize: 16,
-    color: "#047857",
-    textAlign: "center",
-    gap: 10,
+    fontWeight: "bold",
+    color: "#4f46e5",
+  },
+  checkedInTime: {
+    fontSize: 14,
+    color: "#4b5563",
+  },
+  progressContainer: {
+    marginBottom: 16,
+  },
+  progressBarBackground: {
+    height: 8,
+    backgroundColor: "#e5e7eb",
+    borderRadius: 4,
+    overflow: "hidden",
+    marginBottom: 4,
+  },
+  progressBar: {
+    height: "100%",
+    backgroundColor: "#4f46e5",
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: 12,
+    color: "#6b7280",
+    textAlign: "right",
+  },
+  workInfoGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+  workInfoItem: {
+    width: "48%",
+    backgroundColor: "white",
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 10,
+    alignItems: "center",
+  },
+  workInfoLabel: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginTop: 4,
+  },
+  workInfoValue: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#1f2937",
+    marginTop: 2,
+  },
+  workSummaryContainer: {
+    backgroundColor: "#f0fdf4",
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#bbf7d0",
+    marginBottom: 16,
+  },
+  workSummaryHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  workSummaryTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#10b981",
+    marginLeft: 8,
+  },
+  timeInfoContainer: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    backgroundColor: "white",
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 16,
+  },
+  timeInfoItem: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  timeInfoLabel: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginLeft: 8,
+  },
+  timeInfoValue: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#1f2937",
+    marginLeft: 8,
+  },
+  timeInfoDivider: {
+    width: 1,
+    height: 40,
+    backgroundColor: "#e5e7eb",
+  },
+  workDurationContainer: {
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  workDurationLabel: {
+    fontSize: 14,
+    color: "#6b7280",
+  },
+  workDurationValue: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#10b981",
   },
 });
