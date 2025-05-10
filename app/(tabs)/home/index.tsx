@@ -45,6 +45,7 @@ export default function HomeScreen() {
         useNativeDriver: false,
       }).start();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTime, isCheckedIn, checkInTime]);
 
   // 위치 정보 가져오기
